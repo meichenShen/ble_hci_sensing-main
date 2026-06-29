@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Local data / logs
+logs/
+data_exp/
+outputs/
+*.npy
+docs/assets/
+
+# Build artifacts (legacy)
+build/
+dist/

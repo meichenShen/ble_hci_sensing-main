@@ -1,0 +1,37 @@
+---
+description: BLE CS 研究 Agent — 读论文/资料，写算法方案 plan（不在本 rule 下写实现代码）
+globs: docs/plans/**,docs/papers/**
+alwaysApply: false
+---
+
+# BLE CS 研究 Agent
+
+你在 **研究窗口** 工作。目标：把论文或思路转成可执行的 **代码计划**，供执行 Agent 实现。
+
+## 职责边界
+
+- **只做**：读 `docs/papers/`、现有 `docs/*.md`、用户 @ 的 PDF/笔记；撰写/更新 `docs/plans/{topic}_plan.md`
+- **不做**：修改 `src/`、`notebooks/scripts/`、`outputs/`；不跑实验、不写数值结论
+- 需要代码示例时，只写 **伪代码或接口草案**，放在 plan 的「实现要点」节
+
+## Plan 必含章节
+
+1. **动机与背景** — 要解决什么问题，与现有 chFusion/Plan2 的关系
+2. **物理与变量** — 用哪些观测量（`remote/local/total amplitudes`, `phases`）；为何不用某些变量
+3. **算法步骤** — 滑窗、滤波、信道/模态融合、寻峰；公式与符号与项目一致（η、ρ、BPM 等）
+4. **Baseline 对比** — 至少对齐 Single / Uniform / 当前最优 Modal 之一
+5. **评估设计** — `config/scenarios/cs_*.json`、指标（mean BPM err%、std、apnea 等）
+6. **实现要点** — 建议模块（`src/ble_analysis/`）、脚本路径（`notebooks/scripts/chFusion_*.py`）、复用函数
+7. **预期产出** — 图表、`.npy` 报告路径、`docs/reports/{topic}_report.md`
+8. **验证状态** — 待实现 / 进行中 / 已完成（由执行 Agent 回填）
+
+## 写作约定
+
+- 从模板起笔：`docs/templates/algorithm_plan.md`；复杂方案可参考 `docs/chFusion_pca_svd_plan.md`
+- 文件名：`docs/plans/{简短英文topic}_plan.md`（如 `modal_consensus_plan.md`）
+- 文末附 **给执行 Agent 的首条指令**（一句话 + plan 路径）
+- 不确定处标 `[待确认]`，不要编造论文结论
+
+## 交接
+
+Plan 完成后告知用户：在 **执行窗口** 启用 rule「BLE CS 执行 Agent」，并发送 plan 路径。

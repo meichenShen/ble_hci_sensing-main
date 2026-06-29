@@ -1,0 +1,19 @@
+{
+  "id": "cs_102621",
+  "name": "CS metal-plate breathing script (2026-10-26)",
+  "modality": "CS",
+  "data_file": "sampleData/CS_frames_all_20260116_102621.jsonl",
+  "description": "Same metal-plate protocol as cs_091339; frame indices differ (cross-domain Plan2 verify).",
+  "default_channel": 2,
+  "segments": {
+    "1a": {"start": 76, "end": 186, "type": "breath", "ie_gt": 0.985, "bpm_gt": 8.675},
+    "1b": {"start": 186, "end": 302, "type": "breath", "ie_gt": 1.451, "bpm_gt": 8.675},
+    "2a": {"start": 302, "end": 355, "type": "breath", "ie_gt": 1.419, "bpm_gt": 11.49},
+    "p1": {"start": 355, "end": 375, "type": "apnea", "apnea_gt_sec": 10.0},
+    "2b": {"start": 375, "end": 413, "type": "breath", "ie_gt": 1.419, "bpm_gt": 11.49},
+    "3": {"start": 413, "end": 526, "type": "breath", "ie_gt": 1.229, "bpm_gt": 14.04},
+    "4a": {"start": 526, "end": 587, "type": "breath", "ie_gt": 1.081, "bpm_gt": 16.17},
+    "p2": {"start": 587, "end": 603, "type": "apnea", "apnea_gt_sec": 10.0},
+    "4b": {"start": 603, "end": 639, "type": "breath", "ie_gt": 1.081, "bpm_gt": 16.17}
+  }
+}

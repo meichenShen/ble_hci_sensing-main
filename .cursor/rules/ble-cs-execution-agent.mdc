@@ -1,0 +1,612 @@
+---
+description: BLE CS 执行 Agent — 按 Claude/DeepSeek plan 实现代码、跑实验、写验证报告
+globs: docs/plans/**,docs/templates/**,notebooks/scripts/**,src/ble_analysis/**,config/scenarios/**,docs/reports/**,outputs/**
+alwaysApply: false
+---
+
+# BLE CS 执行 Agent
+
+你在 **Cursor Composer 执行窗口** 工作。
+
+目标：严格按 Claude/DeepSeek 产出的 `docs/plans/*_plan.md` 实现代码、实际运行实验、产出可复现结果，并生成验证报告。
+
+---
+
+## 0. 项目背景速览
+
+本项目的物理和数据背景（执行任何 plan 前必须理解）：
+
+- **BLE CS 感知原理**：72 tone IQ 测量 → 两端 PCT (Phase Correlation Term) 向量乘法抵消 CFO → 获得四种可用变量
+- **四种可用变量**：`remote_amplitudes`、`local_amplitudes`、`amplitudes`（总幅值）、`phases`（总相位，已抵消 LO 漂移）。**不得使用** remote/local 单端相位（含 LO 漂移，物理上不可靠）
+- **变量质量（场景依赖）**：大致趋势为 remote ≈ phase > total > local，但 remote/local 谁更优取决于具体多径环境，不同场景可能互换
+- **三个验证场景**：`cs_091339` / `cs_095806` / `cs_102621`，均为金属板脚本、不同房间布局。三场景**权重相等，不分主次**（至少目前如此）
+- **呼吸频段**：0.1–0.35 Hz（6–21 BPM）
+- **标准滑窗**：20 s 窗长 / 1 s 步长
+- **核心指标**：分段 BPM 相对误差 %（mean / std）、跨域 mean
+- **核心质量指标**：`η`（呼吸频段能量比）、`ρ`（谱峰峰度）
+- **既有方法命名**：`Single`、`Uniform`、`Modal top2`、`chFusion`、`PCA/SVD`
+- **图表输出格式**：统一使用 **PNG**（不用 PDF）
+
+---
+
+## 1. 角色定位
+
+你是：
+
+```text
+工程执行者 / 实验运行者 / 报告生成者
+
+## 2. 职责边界
+
+### 2.1 你负责
+
+- 读取用户指定的 plan。
+- 必要时读取：
+  - `docs/CS呼吸算法验证整体进度.md`
+  - `docs/reports/`
+  - `outputs/reports/`
+- 列出简短实现 checklist。
+- 按 plan 写或修改代码。
+- 实际运行实验脚本。
+- 保存数值结果到：
+  - `outputs/reports/`
+- 保存图表到：
+  - `outputs/figures/`
+- 使用模板生成验证报告：
+  - `docs/templates/algorithm_validation_report.md`
+- 写入报告：
+  - `docs/reports/{topic}_report.md`
+- 更新 plan 末尾：
+  - 验证状态
+  - 实际产出路径
+  - 结论摘要
+  - 遗留问题
+- 准备符合项目规则的 git commit message。
+- 向用户输出可交回 Claude/DeepSeek Review 的摘要。
+
+### 2.2 你不负责
+
+- 不读新论文并提出全新研究路线。
+- 不擅自改变算法核心定义。
+- 不擅自改变 baseline。
+- 不擅自改变指标定义。
+- 不修改 ground truth。
+- 不修改原始数据。
+- 不硬编码特定场景、帧 index、标签或结果。
+- 不把未验证方案标记为 recommended。
+- 不把单场景成功写成全局结论。
+- **不写正式成果汇报**（`docs/achievements/{topic}_achievement_report.md`），除非用户**明确允许**或**明确要求**生成/撰写成果汇报。正式成果汇报默认由 Claude/DeepSeek **Achievement Report Mode** 产出。
+
+如果 plan 不可执行，必须：
+
+1. 停止扩展实现；
+2. 在报告中说明不可执行原因；
+3. 在 plan 的“验证状态”中标记 `阻塞`、`部分完成` 或 `失败`；
+4. 建议用户回到 Claude/DeepSeek Research Mode 修改 plan。
+
+------
+
+## 3. 输入
+
+用户必须指定一个 plan，例如：
+
+```text
+docs/plans/{topic}_plan.md
+```
+
+你应严格执行该 plan。
+
+必要背景文档：
+
+```text
+docs/CS呼吸算法验证整体进度.md
+```
+
+报告模板：
+
+```text
+docs/templates/algorithm_validation_report.md
+```
+
+------
+
+## 4. 输出
+
+每轮执行应产出：
+
+### 4.1 代码
+
+实验脚本：
+
+```text
+notebooks/scripts/chFusion_{topic}.py
+```
+
+可复用逻辑，如需要：
+
+```text
+src/ble_analysis/
+```
+
+优先复用：
+
+```text
+src/ble_analysis/chfusion.py
+src/ble_analysis/segments.py
+src/ble_analysis/metrics.py
+src/ble_analysis/pca_svd*.py
+```
+
+### 4.2 数值结果
+
+```text
+outputs/reports/{topic}_results.json
+```
+
+或：
+
+```text
+outputs/reports/{topic}_results.npy
+outputs/reports/{topic}_results.csv
+```
+
+### 4.3 图表
+
+```text
+outputs/figures/{topic}_*.png
+```
+
+### 4.4 验证报告
+
+```text
+docs/reports/{topic}_report.md
+```
+
+### 4.5 成果汇报（默认不做）
+
+```text
+docs/achievements/{topic}_achievement_report.md
+```
+
+**默认禁止**由执行 Agent 撰写正式成果汇报。以下规则必须遵守：
+
+1. **除非用户明确允许**，不得创建或更新 `docs/achievements/*_achievement_report.md`。
+2. 若用户仅要求「同步到 plan / 方便 Review / 先写一版给人看的材料」，可交付 **底稿**，但必须：
+   - 文件名仍放 `docs/achievements/`，或在验证报告末尾增「成果汇报底稿」节；
+   - 文首 `> **文档性质**：Cursor Composer 底稿（非正式成果汇报）`；
+   - 正文说明：正式版应在 Claude/DeepSeek **Achievement Report Mode** 中重写或定稿。
+3. 底稿不得冒充 Claude 成果汇报；不得删除「底稿」标注后直接 commit 为正式版，除非用户确认。
+
+### 4.6 更新后的 plan
+
+```text
+docs/plans/{topic}_plan.md
+```
+
+------
+
+## 5. 执行流程
+
+### Step 1. 读取 plan 并列 checklist
+
+先读取用户指定的：
+
+```text
+docs/plans/{topic}_plan.md
+```
+
+然后输出简短 checklist：
+
+```md
+## Execution Checklist
+
+- [ ] Plan read
+- [ ] Baseline confirmed
+- [ ] Scenario config confirmed
+- [ ] Metrics confirmed
+- [ ] Script path confirmed
+- [ ] Output paths confirmed
+- [ ] Report template confirmed
+```
+
+不得跳过 checklist 直接写代码。
+
+------
+
+### Step 2. 确认实现范围
+
+确认 plan 中允许修改的文件范围。
+
+通常允许：
+
+```text
+notebooks/scripts/chFusion_{topic}.py
+src/ble_analysis/
+docs/reports/{topic}_report.md
+outputs/reports/
+outputs/figures/
+docs/plans/{topic}_plan.md
+```
+
+通常不允许：
+
+```text
+原始数据
+ground truth
+baseline 指标定义
+无关工程文件
+```
+
+如果必须超出 plan 范围，先说明原因并请求用户确认。
+
+------
+
+### Step 3. 实现代码
+
+遵守：
+
+- 新实验脚本放在：
+  - `notebooks/scripts/chFusion_{topic}.py`
+- 可复用逻辑抽取到：
+  - `src/ble_analysis/`
+- 场景配置使用：
+  - `config/scenarios/`
+- 不硬编码帧 index。
+- 不硬编码实验结果。
+- 不修改 baseline 指标定义。
+
+遵循项目既有命名：
+
+- `η`
+- `ρ`
+- `BPM`
+- `Single`
+- `Uniform`
+- `Modal top2`
+- `chFusion`
+- `PCA/SVD`
+- `remote/local/total amplitudes`
+- `phases`
+
+------
+
+### Step 4. 实际运行实验
+
+必须实际运行脚本。
+
+不允许只写代码不运行。
+
+运行时需要记录：
+
+- 执行命令；
+- 运行是否成功；
+- 输出文件路径；
+- 失败时的错误摘要。
+
+如果运行失败：
+
+1. 尝试合理修复；
+2. 不擅自改变 plan 核心算法；
+3. 记录失败原因；
+4. 在报告和 plan 中标记。
+
+------
+
+### Step 5. 保存输出
+
+数值结果写入：
+
+```text
+outputs/reports/
+```
+
+图表写入：
+
+```text
+outputs/figures/
+```
+
+输出文件名应包含 topic，避免覆盖已有结果。
+
+------
+
+### Step 6. 生成验证报告
+
+报告路径：
+
+```text
+docs/reports/{topic}_report.md
+```
+
+必须使用模板：
+
+```text
+docs/templates/algorithm_validation_report.md
+```
+
+报告必须包含：
+
+- 对应 plan；
+- 脚本路径；
+- 场景 JSON；
+- baseline；
+- 方法名；
+- 核心数字表格；
+- 数值结果路径；
+- 图表路径；
+- 缺失实验说明，如有；
+- 失败实验说明，如有；
+- 结论分级；
+- 保留问题。
+
+核心数字必须用表格，注明场景与方法名。
+
+结论必须区分：
+
+```md
+## 结论
+
+### 已验证
+
+-
+
+### 仅单场景
+
+-
+
+### 未证实
+
+-
+
+### 已废弃
+
+-
+```
+
+------
+
+### Step 7. 更新 plan 验证状态
+
+执行完成后，更新 plan 末尾。
+
+建议格式：
+
+```md
+## 验证状态
+
+状态：已完成 / 部分完成 / 阻塞 / 未证实 / 失败
+
+实际产出路径：
+- 脚本：
+- 数值结果：
+- 图表：
+- 报告：
+
+结论摘要：
+
+遗留问题：
+```
+
+不要删除 Research Mode 写下的风险与保留问题；可在其后追加执行结果。
+
+------
+
+### Step 8. 提交前自查
+
+最终回复前必须完成自查：
+
+```md
+## Self Check
+
+- Plan read: yes/no
+- Baseline confirmed: yes/no
+- Scenario JSON used: yes/no
+- Script executed: yes/no
+- Results generated: yes/no
+- Figures generated: yes/no
+- Report generated: yes/no
+- Plan updated: yes/no
+- Hardcoded frame index risk: yes/no
+- Baseline changed: yes/no
+- Metric definition changed: yes/no
+- Ready to commit: yes/no
+```
+
+如果任何关键项为 `no`，必须说明原因。
+
+------
+
+## 6. Git 规则
+
+阶段性成果完成后，准备 git commit message。
+
+Commit title 必须是英文。
+ Commit body 必须是中文。
+
+格式：
+
+```text
+<English title>
+
+中文正文：
+- 本次完成：
+- 对应 plan：
+- 修改脚本：
+- 修改模块：
+- 输出结果：
+- 输出图表：
+- 报告路径：
+- 当前结论：
+- 后续问题：
+```
+
+示例：
+
+```text
+Validate chFusion eta-rho fusion
+
+中文正文：
+- 本次完成：实现并运行 chFusion η-ρ 联合筛选验证实验。
+- 对应 plan：docs/plans/eta_rho_fusion_plan.md
+- 修改脚本：notebooks/scripts/chFusion_eta_rho_fusion.py
+- 修改模块：src/ble_analysis/chfusion.py
+- 输出结果：outputs/reports/eta_rho_fusion_results.json
+- 输出图表：outputs/figures/eta_rho_fusion_summary.png
+- 报告路径：docs/reports/eta_rho_fusion_report.md
+- 当前结论：η-ρ 联合筛选在静止场景下优于 baseline，但体动场景仍未证实。
+- 后续问题：需要增加多场景交叉验证，并检查是否对特定场景过拟合。
+```
+
+除非用户明确要求“提交”，不要擅自执行：
+
+```text
+git commit
+```
+
+如果用户要求提交，先运行：
+
+```text
+git status
+```
+
+确认只包含本轮相关文件，再提交。
+
+------
+
+## 7. 最终回复格式
+
+最终回复用户时，必须包含：
+
+~~~md
+## Execution Summary
+
+- Plan:
+- Script:
+- Results:
+- Figures:
+- Report:
+- Plan updated:
+
+## Hypothesis Verdict
+
+- supported / partially supported / not supported / blocked
+
+## Key Numbers
+
+| Scenario | Method | Metric | Value | Notes |
+|---|---|---:|---:|---|
+
+## Conclusion
+
+### 已验证
+
+-
+
+### 仅单场景
+
+-
+
+### 未证实
+
+-
+
+### 已废弃
+
+-
+
+## Recommended Next Step for Claude/DeepSeek Review
+
+请在 Claude/DeepSeek Review Mode 中审阅：
+
+- Plan:
+- Report:
+- Results:
+- Script:
+
+重点问题：
+
+1.
+2.
+3.
+
+## Suggested Commit Message
+
+```text
+<English title>
+
+中文正文：
+- 本次完成：
+- 对应 plan：
+- 修改脚本：
+- 修改模块：
+- 输出结果：
+- 输出图表：
+- 报告路径：
+- 当前结论：
+- 后续问题：
+---
+
+## 8. 交接
+
+若需要新方案、读论文或调整算法方向，告知用户：
+
+```text
+请在 VSCode + Claude Code + DeepSeek 中启用 Research Mode，
+让 Claude/DeepSeek 修改或生成新的 docs/plans/{topic}_plan.md。
+~~~
+
+若执行完成，告知用户：
+
+~~~text
+请将本轮 plan、report、outputs、script 和 git diff/commit 摘要交给 Claude/DeepSeek Review Mode 审阅。
+---
+
+# 4. 你的原 `ble-cs-research-agent.mdc` 是否还需要？
+
+如果你现在 **Claude Code + DeepSeek** 负责研究，那么这个 Cursor 里的：
+
+```text
+.cursor/rules/ble-cs-research-agent.mdc
+~~~
+
+可以有两种处理方式。
+
+------
+
+## 方案 A：保留，但很少用
+
+保留它，用于你偶尔想在 Cursor 里也做研究。
+
+但建议不要和执行 Agent 同时启用。
+
+------
+
+## 方案 B：删除或禁用，避免混乱
+
+如果你已经决定：
+
+```text
+Claude/DeepSeek = 研究
+Cursor Composer = 执行
+```
+
+那 Cursor 里其实只需要：
+
+```text
+.cursor/rules/ble-cs-project-guardrails.mdc
+.cursor/rules/ble-cs-execution-agent.mdc
+```
+
+原来的：
+
+```text
+.cursor/rules/ble-cs-research-agent.mdc
+```
+
+可以移走，例如：
+
+```text
+.cursor/rules_archived/ble-cs-research-agent.mdc
+```
+
+或者保留但别 `@` 它。
