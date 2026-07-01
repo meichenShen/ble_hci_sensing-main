@@ -27,6 +27,19 @@ In the code, "channel" may also be used to index tone-based streams, but the key
    tone 质量评分：通过呼吸带能量和谱峰突出度为每个 tone 计算质量权重。
    加权融合：对所有 tone 的 BPM 候选值做加权中位数融合，必要时回退到权重最高的 tone。
 
+4. Clarifications / 澄清
+   - Which variable is used? / 使用了哪些变量
+     - The implementation collects and evaluates all three modal variables: `remote_amplitudes`, `local_amplitudes`, and `phases` (see `MODAL_LIU_VARIABLES` in `src/ble_analysis/liu_2016.py`). For each segment/window we gather bandpass-filtered waveforms from available `variable|ch` entries and treat each as a separate "tone" candidate.
+
+   - What algorithms / filters / weights are used? / 使用了哪些算法、滤波与权重
+     - Filtering: per-segment pipeline uses `FilterParams` (median filter, highpass 0.05 Hz, bandpass 0.1–0.35 Hz, see `src/ble_analysis/segments.py`). The code reads `bandpass_filtered` and `highpass_filtered` outputs for scoring and BPM estimation.
+     - Per-tone BPM: `_bpm_from_waveform` fits a sinusoidal basis over the configured breath band and selects the best frequency by least-squares score, returning BPM = 60 * f.
+     - Quality scores: two conservative metrics are used — energy ratio η (`_energy_ratio`): breath-band energy / total energy; and peak ratio ρ (`_tone_band_quality`): peak power / total breath-band power. These are computed per tone/window.
+     - Fusion rule: per-window weights = clip(η * ρ) (with small `eps` safeguard). If all weights are near-zero, uniform weights are used. Final BPM is the weighted median of per-tone BPMs; if a single tone dominates the weights and has a valid BPM, the implementation falls back to that dominant-tone BPM.
+
+   - Additional diagnostics / 额外诊断图
+     - I generated more diagnostic figures to inspect per-window and per-tone behaviour (see Figures below). These include window-level BPM curves, window-level error histograms, segment-level relative-error bars, and a tone-quality scatter (η vs ρ with BPM colormap) per selected segment.
+
 2. Code location / 代码位置
    - `src/ble_analysis/liu_2016.py`
    - `notebooks/scripts/chFusion_liu_2016.py`
@@ -112,29 +125,43 @@ In the code, "channel" may also be used to index tone-based streams, but the key
 
 ## Figures / 图表
 
-### Figure 1: Segment 3 window-level BPM curve / 段落 3 窗级 BPM 曲线
+### Figure A: Segment 3 window-level BPM curve / 段落 3 窗级 BPM 曲线
 
-![](../../outputs/figures/liu_2016_cs_091339_segment_3.png)
+![](../../outputs/figures/liu_2016_cs_091339_segment_3_window_bpm_curve.png)
 
 This figure shows the estimated BPM per sliding window for `cs_091339` segment `3`, together with the ground truth BPM.
 
 该图展示了 `cs_091339` 段落 `3` 的窗级 BPM 估计曲线，并叠加了真值 BPM。
 
-### Figure 2: Segment error analysis / 段落误差分析
+### Figure B: Segment 3 tone quality scatter / 段落 3 tone 质量散点图
+
+![](../../outputs/figures/liu_2016_cs_091339_segment_3_tone_quality.png)
+
+This scatter plots per-tone energy ratio η vs peak ratio ρ for one window in segment 3; color indicates the BPM candidate estimated per tone.
+
+该散点图展示了段落 3 某一窗中每个 tone 的 η 与 ρ 值，颜色表示该 tone 的 BPM 候选值。
+
+### Figure C: Segment 3 window-level BPM error histogram / 段落 3 窗级误差直方图
+
+![](../../outputs/figures/liu_2016_cs_091339_segment_3_window_error_hist.png)
+
+Distribution of absolute BPM errors per window for `cs_091339` segment `3`.
+
+该图展示 `cs_091339` 段落 3 中窗级 BPM 绝对误差的分布。
+
+### Figure D: Segment-level relative error bars / 段落相对误差柱状图
+
+![](../../outputs/figures/liu_2016_cs_091339_segment_rel_err.png)
+
+Segment-level relative error (%) across the scenario.
+
+场景中各段落的相对误差（%）。
+
+### Existing summary figures
 
 ![](../../outputs/figures/segment_error_analysis.png)
 
-This figure provides a high-level view of how segment-level error behaves across the benchmark.
-
-该图提供了基线在各段落上的误差表现概览。
-
-### Figure 3: Window error distribution / 窗级误差分布
-
 ![](../../outputs/figures/segment_window_error_distribution.png)
-
-This figure shows the window-level BPM error distribution across selected segments.
-
-该图展示了选定段落中窗级 BPM 误差的分布情况。
 
 ## Analysis / 分析
 
@@ -205,40 +232,3 @@ The following files are currently modified or untracked:
 - `src/ble_analysis/liu_2016.py`
 - `tests/test_liu_2016.py`
 
-## How to push to GitHub / 如何推送到 GitHub
-
-1. Stage your changes:
-
-```bash
-git add src/ble_analysis/liu_2016.py \
-    notebooks/liu_2016_step_by_step.ipynb \
-    notebooks/executed_liu_2016_step_by_step.ipynb \
-    notebooks/scripts/chFusion_liu_2016.py \
-    tests/test_liu_2016.py \
-    docs/reports/liu_2016_report.md \
-    src/ble_analysis/__init__.py
-```
-
-2. Commit with a clear message:
-
-```bash
-git commit -m "Validate Liu 2016 baseline on BLE CS" -m "实现并验证 Liu 2016 风格基线，补充 notebook 和 report。"
-```
-
-3. Push to the remote branch:
-
-```bash
-git push origin HEAD
-```
-
-If you want to create a new branch first:
-
-```bash
-git checkout -b liu-2016-baseline
-# then add/commit as above
-git push -u origin liu-2016-baseline
-```
-
-4. If GitHub rejects or asks for authentication, check your remote settings or use SSH/token authentication.
-
-如果你使用的是 GitHub Desktop/SourceTree，也可以直接在图形界面中 stage/commit/push。
