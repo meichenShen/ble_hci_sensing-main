@@ -325,3 +325,168 @@ def run_liu_2016_benchmark(
         "metric_params": mp,
         "segment_config": segment_config,
     }
+
+
+def _estimate_single_modal_window(
+    multichannel_by_var: Dict[str, Dict[str, Optional[dict]]],
+    modal_variable: str,
+    seg_name: str,
+    ch_list: Sequence[Any],
+    st: int,
+    end: int,
+    fs: float,
+    cfg: ChFusionConfig,
+) -> Tuple[float, np.ndarray, np.ndarray]:
+    """Estimate Liu-style BPM using only one modal variable."""
+    ref_seg = multichannel_by_var.get(modal_variable, {}).get(seg_name)
+    if ref_seg is None:
+        return float("nan"), np.array([], dtype=float), np.array([], dtype=float)
+    
+    ch_map = ref_seg["channels"]
+    if not ch_map:
+        return float("nan"), np.array([], dtype=float), np.array([], dtype=float)
+    
+    eta_list: List[float] = []
+    rho_list: List[float] = []
+    bp_cols: List[np.ndarray] = []
+    
+    for ch in ch_list:
+        ch_data = ch_map.get(ch, {})
+        if not ch_data:
+            continue
+        ch_var = ch_data.get(modal_variable)
+        if ch_var is None:
+            continue
+        bp = ch_var["bandpass_filtered"]
+        hp = ch_var["highpass_filtered"]
+        if len(bp) < end or len(hp) < end:
+            continue
+        bp_slice = bp[st:end]
+        hp_slice = hp[st:end]
+        eta_list.append(_energy_ratio(hp_slice, fs, cfg))
+        rho_list.append(_tone_band_quality(bp_slice, fs, cfg))
+        bp_cols.append(bp_slice)
+    
+    if not bp_cols:
+        return float("nan"), np.array([], dtype=float), np.array([], dtype=float)
+    
+    data_matrix = np.column_stack(bp_cols)
+    return estimate_liu_style_window_bpms(
+        data_matrix, fs, cfg=cfg, eta_per_tone=np.asarray(eta_list), rho_per_tone=np.asarray(rho_list)
+    )
+
+
+def estimate_liu_style_segment_single_modal(
+    multichannel_by_var: Dict[str, Dict[str, Optional[dict]]],
+    modal_variable: str,
+    seg_name: str,
+    *,
+    config: Optional[ChFusionConfig] = None,
+    metric_params: Optional[BreathMetricParams] = None,
+    verbose: bool = False,
+) -> Optional[dict]:
+    """Run Liu-style BPM fusion for one segment using only one modal variable."""
+    cfg = config or ChFusionConfig()
+    mp = metric_params or BreathMetricParams()
+
+    ref_seg = multichannel_by_var.get(modal_variable, {}).get(seg_name)
+    if ref_seg is None:
+        return None
+    
+    metadata = ref_seg["metadata"]
+    if metadata.get("segment_type") == "apnea":
+        return None
+
+    bpm_gt = metadata.get("bpm_gt")
+    fs = metadata["sampling_rate"]
+    ch_map = ref_seg["channels"]
+    if not ch_map:
+        return None
+
+    ch_list = sorted(ch_map.keys(), key=lambda c: (isinstance(c, str), str(c)))
+    ref_len = max(len(ch_map[c][modal_variable]["bandpass_filtered"]) for c in ch_list)
+    win_len = int(round(mp.window_length_sec * fs))
+    step_len = int(round(mp.step_length_sec * fs))
+    if ref_len < win_len:
+        if verbose:
+            print(f"⚠️  {seg_name}: length {ref_len} < window {win_len}, skip")
+        return None
+
+    starts = _sliding_window_indices(ref_len, win_len, step_len)
+    bpms: List[float] = []
+    for st in starts:
+        end = st + win_len
+        bpm, _tone_bpms, _weights = _estimate_single_modal_window(
+            multichannel_by_var, modal_variable, seg_name, ch_list, st, end, fs, cfg
+        )
+        bpms.append(bpm)
+
+    return {
+        "segment": seg_name,
+        "bpm_gt": bpm_gt,
+        "metadata": metadata,
+        "modal_variable": modal_variable,
+        "liu_2016_modal": {
+            **_seg_bpm_stats(np.asarray(bpms), bpm_gt, len(starts)),
+            "bpm_per_window": np.asarray(bpms, dtype=float),
+        },
+    }
+
+
+def run_liu_2016_modal_comparison(
+    segment_config: Dict[str, dict],
+    *,
+    filter_params: Optional[FilterParams] = None,
+    metric_params: Optional[BreathMetricParams] = None,
+    config: Optional[ChFusionConfig] = None,
+    verbose: bool = True,
+    cache_dir: Optional[str] = None,
+    multichannel_by_var: Optional[Dict[str, Dict[str, Optional[dict]]]] = None,
+) -> dict:
+    """Run Liu 2016 benchmark for each modal variable separately and combined."""
+    from ble_analysis.chfusion import run_multichannel_segment_filtering
+
+    cfg = config or ChFusionConfig()
+    fp = filter_params or FilterParams()
+    mp = metric_params or BreathMetricParams()
+
+    if multichannel_by_var is None:
+        multichannel_by_var = {}
+        for variable in MODAL_LIU_VARIABLES:
+            mc, _fs = run_multichannel_segment_filtering(
+                None,
+                segment_config,
+                variable=variable,
+                filter_params=fp,
+                verbose=verbose,
+                cache_dir=cache_dir,
+            )
+            multichannel_by_var[variable] = mc
+
+    results_by_modal = {}
+    
+    # Run for each modal variable separately
+    for modal_var in MODAL_LIU_VARIABLES:
+        modal_results = {}
+        for seg_name in sorted(segment_config.keys()):
+            result = estimate_liu_style_segment_single_modal(
+                multichannel_by_var, modal_var, seg_name, config=cfg, metric_params=mp, verbose=verbose
+            )
+            modal_results[seg_name] = result
+        results_by_modal[modal_var] = modal_results
+    
+    # Run combined (all modals together)
+    combined_results = {}
+    for seg_name in sorted(segment_config.keys()):
+        result = estimate_liu_style_segment(
+            multichannel_by_var, seg_name, config=cfg, metric_params=mp, verbose=verbose
+        )
+        combined_results[seg_name] = result
+    
+    return {
+        "results_by_modal": results_by_modal,
+        "results_combined": combined_results,
+        "multichannel_by_var": multichannel_by_var,
+        "config": cfg,
+        "metric_params": mp,
+    }
