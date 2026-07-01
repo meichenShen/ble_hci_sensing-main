@@ -53,6 +53,82 @@ In the code, "channel" may also be used to index tone-based streams, but the key
    复用 BLE CS 管道中的多通道滤波缓存与段落配置。
    使用 `BreathMetricParams` 和 `ChFusionConfig` 中定义的滑窗参数。
 
+## Detailed implementation (for reproducibility) / 详细实现（可复现说明）
+
+1) Variables collected
+- The code evaluates every available `variable|channel` pair for the three modal variables: `remote_amplitudes`, `local_amplitudes`, and `phases`. Each such `variable|ch` entry yields a pair of filtered arrays (`bandpass_filtered`, `highpass_filtered`) and is treated as an independent "tone" candidate for that sliding window.
+
+2) Exact filter parameters
+- `FilterParams` (see `src/ble_analysis/segments.py`) — defaults used in the notebook:
+  - `median_window = 3`
+  - `highpass_cutoff = 0.05` Hz, `highpass_order = 1`
+  - `bandpass_lowcut = 0.1` Hz, `bandpass_highcut = 0.35` Hz, `bandpass_order = 2`
+
+3) Sliding-window / BPM windowing
+- `BreathMetricParams` (defaults): `breath_freq_low = 0.1 Hz`, `breath_freq_high = 0.35 Hz`, `window_length_sec = 20.0`, `step_length_sec = 1.0`.
+- Window length in samples = round(window_length_sec * fs), step = round(step_length_sec * fs).
+
+4) Per-tone BPM estimation algorithm (`_bpm_from_waveform`)
+- Precondition: zero-mean the windowed signal and require finite samples.
+- Frequency grid: `freqs = linspace(cfg.breath_freq_low, cfg.breath_freq_high, 512)` (512-point scan inside breath band).
+- For each candidate frequency f, form two basis vectors sin(2π f t), cos(2π f t) and compute least-squares coefficients to fit the signal.
+- Score = dot(sig, fit) / (||sig|| * ||fit|| + eps) (normalized correlation-like score). Choose f with maximal score and return `60 * f` as BPM.
+
+5) Tone quality metrics (weights)
+- Energy ratio η: implemented in `_energy_ratio` — compute FFT power of windowed (Hann) signal; sum power in breath band divided by total power in configured total band. Returns a ratio in [0,1].
+- Peak ratio ρ: implemented in `_tone_band_quality` — compute breath-band FFT power, return `peak_power / total_band_power` (conservative peak prominence).
+- Combined per-tone weight: `w_c = clip(η * ρ, 0, +inf) + eps`. If sum(w_c) ≤ eps, the code uses uniform weights.
+
+6) Fusion: weighted median + dominant-tone fallback
+- Weighted median: `_weighted_median(values, weights)` sorts values, computes cumulative normalized weights, and returns the value at the 0.5 quantile.
+- Dominant-tone fallback: if `argmax(weights)` yields a tone with finite BPM, that BPM is returned immediately (this mirrors the paper's pragmatic preference for a very-high-confidence tone).
+
+7) Pseudocode (per-window)
+
+```text
+For each sliding window:
+  collect bandpass_filtered waveform for every (variable, channel) -> x_i(t)
+  compute eta_i = _energy_ratio(highpass(x_i))
+  compute rho_i = _tone_band_quality(bandpass(x_i))
+  estimate bpm_i = _bpm_from_waveform(bandpass(x_i))
+  w_i = clip(eta_i * rho_i) + eps
+  if sum(w_i) <= eps: w_i = ones
+  dominant = argmax(w_i)
+  if isfinite(bpm_dominant): bpm_out = bpm_dominant
+  else: bpm_out = weighted_median(bpm_i, w_i)
+```
+
+8) Reproducible commands
+- Generate diagnostics and figures for a single scenario/segment:
+```bash
+PYTHONPATH=src python notebooks/scripts/chFusion_liu_2016_diagnostics.py --scenario cs_091339 --segment 3
+```
+- Generate diagnostics for all scenarios:
+```bash
+PYTHONPATH=src python notebooks/scripts/chFusion_liu_2016_diagnostics.py --all
+```
+- Run the full benchmark and save combined results:
+```bash
+PYTHONPATH=src python notebooks/scripts/chFusion_liu_2016.py --all
+```
+
+9) Generated figures (examples)
+- `outputs/figures/liu_2016_cs_091339_segment_3_window_bpm_curve.png`
+- `outputs/figures/liu_2016_cs_091339_segment_3_tone_quality.png`
+- `outputs/figures/liu_2016_cs_091339_segment_3_window_error_hist.png`
+- `outputs/figures/liu_2016_cs_091339_segment_rel_err.png`
+- summary figures: `segment_error_analysis.png`, `segment_window_error_distribution.png`
+
+10) Files of interest (implementation and runners)
+- `src/ble_analysis/liu_2016.py` — Liu-style estimator and window aggregation
+- `src/ble_analysis/chfusion.py` — common helpers: `_energy_ratio`, `_weighted_median`, `_seg_bpm_stats`, FFT helpers
+- `src/ble_analysis/segments.py` — `FilterParams` and sliding-window helpers
+- `notebooks/liu_2016_step_by_step.ipynb` — interactive walkthrough
+- `notebooks/scripts/chFusion_liu_2016.py` — batch runner
+- `notebooks/scripts/chFusion_liu_2016_diagnostics.py` — diagnostic figure generator
+
+If you want, I can also add a short math box with the exact formulas for the LS fit and the weighted median definition in LaTeX, or append a ready-to-run `Makefile` snippet that produces all figures and the report PDF.
+
 ## Execution steps / 执行步骤
 
 ### Step 1: Environment setup / 环境准备
