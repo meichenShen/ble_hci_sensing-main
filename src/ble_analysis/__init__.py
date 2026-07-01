@@ -17,6 +17,12 @@ from ble_analysis.diagnostics import (
     print_time_interval_summary,
 )
 from ble_analysis.filters import apply_filter_pipeline
+from ble_analysis.liu_2016 import (
+    MODAL_LIU_VARIABLES,
+    estimate_liu_style_segment,
+    estimate_liu_style_window_bpms,
+    run_liu_2016_benchmark,
+)
 from ble_analysis.paths import ensure_output_dirs, find_project_root
 from ble_analysis.plotting import (
     plot_channel_amplitude_phase,
@@ -55,6 +61,10 @@ __all__ = [
     "print_time_interval_summary",
     "resample_to_uniform_grid",
     "apply_filter_pipeline",
+    "MODAL_LIU_VARIABLES",
+    "estimate_liu_style_segment",
+    "estimate_liu_style_window_bpms",
+    "run_liu_2016_benchmark",
     "setup_plot_style",
     "plot_channel_amplitude_phase",
     "plot_time_intervals",
