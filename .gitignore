@@ -22,6 +22,7 @@ Thumbs.db
 logs/
 data_exp/
 outputs/
+!outputs/figures/  # Keep figures directory tracked
 *.npy
 docs/assets/
 
