@@ -37,6 +37,7 @@ __all__ = [
     "estimate_liu_style_segment",
     "run_liu_2016_benchmark",
     "MODAL_LIU_VARIABLES",
+    "_gather_liu_modal_window_data",
 ]
 
 
@@ -146,7 +147,7 @@ def estimate_liu_style_window_bpms(
     return float(final_bpm), bpm_per_tone, weights
 
 
-def _estimate_modal_liu_window(
+def _gather_liu_modal_window_data(
     multichannel_by_var: Dict[str, Dict[str, Optional[dict]]],
     seg_name: str,
     ch_list: Sequence[Any],
@@ -154,10 +155,12 @@ def _estimate_modal_liu_window(
     end: int,
     fs: float,
     cfg: ChFusionConfig,
-) -> Tuple[float, np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[str]]:
+    """Collect bandpass window data and quality scores from all modal variables."""
     eta_list: List[float] = []
     rho_list: List[float] = []
     bp_cols: List[np.ndarray] = []
+    labels: List[str] = []
 
     for variable in MODAL_LIU_VARIABLES:
         ref_seg = multichannel_by_var.get(variable, {}).get(seg_name)
@@ -182,14 +185,36 @@ def _estimate_modal_liu_window(
             eta_list.append(_energy_ratio(hp_slice, fs, cfg))
             rho_list.append(_tone_band_quality(bp_slice, fs, cfg))
             bp_cols.append(bp_slice)
-            break
-        if bp_cols:
-            break
+            labels.append(f"{variable}|ch{ch}")
 
     if not bp_cols:
-        return float("nan"), np.array([], dtype=float), np.array([], dtype=float)
+        return (
+            np.empty((end - st, 0), dtype=float),
+            np.empty(0, dtype=float),
+            np.empty(0, dtype=float),
+            [],
+        )
     data_matrix = np.column_stack(bp_cols)
-    return estimate_liu_style_window_bpms(data_matrix, fs, cfg=cfg, eta_per_tone=np.asarray(eta_list), rho_per_tone=np.asarray(rho_list))
+    return data_matrix, np.asarray(eta_list, dtype=float), np.asarray(rho_list, dtype=float), labels
+
+
+def _estimate_modal_liu_window(
+    multichannel_by_var: Dict[str, Dict[str, Optional[dict]]],
+    seg_name: str,
+    ch_list: Sequence[Any],
+    st: int,
+    end: int,
+    fs: float,
+    cfg: ChFusionConfig,
+) -> Tuple[float, np.ndarray, np.ndarray]:
+    data_matrix, eta_per_tone, rho_per_tone, _labels = _gather_liu_modal_window_data(
+        multichannel_by_var, seg_name, ch_list, st, end, fs, cfg
+    )
+    if data_matrix.size == 0:
+        return float("nan"), np.array([], dtype=float), np.array([], dtype=float)
+    return estimate_liu_style_window_bpms(
+        data_matrix, fs, cfg=cfg, eta_per_tone=eta_per_tone, rho_per_tone=rho_per_tone
+    )
 
 
 def estimate_liu_style_segment(
