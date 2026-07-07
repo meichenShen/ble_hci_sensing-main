@@ -1,238 +1,154 @@
-# Liu et al. 2016 基于 BLE CS 的基线验证
+# Liu et al. 2016 复现说明与文件整理
 
-## 摘要
+## 范围与命名
 
-本报告记录了 Liu 2016 风格基线在 BLE CS 呼吸 BPM 估计中的完整实现与验证。方法实现于 `src/ble_analysis/liu_2016.py`，并通过 notebook 与脚本完成实验验证。
+本项目现在把 Liu 2016 相关实现分成两条清楚的线，后续写报告、画图和比较时都按这个命名使用：
 
-## 什么是 tone？
+1. **`liu_2016_paper`**：按照 Liu et al. 2016 原文流程实现的严格复现版本，用于 BLE CS 幅度频点。
+2. **`liu_eta_rho_adapted`**：已有的 BLE 适配基线，使用本项目自定义的信号质量指标。
 
-在 BLE CS 中，"tone" 指 72 个 tone 中的一个频率子载波，而非独立的物理射频通道。每个 tone 在滤波后会得到一条时域波形。Liu 2016 基线对每个 tone 的时域信号分别估计 BPM 候选值，再对这些候选值进行融合。
+`liu_2016_paper` 不使用 `η·ρ` 权重、谱峰突出度权重、dominant-tone fallback、投票、PCA/SVD、门控、top-k 融合或多模态融合。`remote/local/phase/combined` 只能作为后续 BLE 消融实验，不能写成 Liu 原文方法。
 
-在代码中，`channel` 有时也用于表示 tone 的索引，但核心思想是先生成每个 tone 的 BPM 候选值，再进行 tone 级融合。
+## 文件整理
 
-## 实现详情
+当前与 Liu 复现直接相关的文件如下：
 
-1. 方法概念
-   - 逐 tone BPM 估计：对每个滑窗内每个 tone 的滤波信号分别估计 BPM 候选值。
-   - tone 质量评分：通过呼吸带能量和谱峰突出度为每个 tone 计算质量权重。
-   - 加权融合：对所有 tone 的 BPM 候选值做加权中位数融合，必要时回退到权重最高的 tone。
+| 文件 | 当前定位 |
+|---|---|
+| `src/ble_analysis/liu_2016.py` | Liu 2016 相关算法实现；同时保留 `liu_2016_paper` 和 `liu_eta_rho_adapted` 两条路径。 |
+| `notebooks/scripts/chFusion_liu_2016_paper.py` | 严格原文复现实验入口；默认只跑 `amplitudes`。 |
+| `notebooks/scripts/chFusion_liu_2016.py` | 历史 Liu-style/适配版运行脚本；保留兼容，但不再作为严格复现入口。 |
+| `notebooks/scripts/chFusion_liu_2016_modal_comparison.py` | BLE 多变量消融实验；不能表述为 Liu 原文复现。 |
+| `tests/test_liu_2016.py` | 同时测试严格原文复现和 BLE 适配基线，并在测试名中区分。 |
+| `docs/reports/liu_2016_report.md` | 本文件：方法说明、命名约定、输出结构。 |
+| `docs/reports/liu_2016_results_report.md` | 结果报告：本次运行结果、图表索引和解释。 |
 
-2. 变量与澄清
-   - 使用了哪些变量：实现对三种模态变量（`remote_amplitudes`、`local_amplitudes` 和 `phases`）进行采集和评估。对每个段落/窗口，我们采集每个可用 `variable|ch` 对应的带通滤波波形，将其作为独立的 "tone" 候选。
+## 原文严格复现版本
 
-   - 使用了哪些算法、滤波与权重：
-     - 滤波：逐段使用 `FilterParams` 管线（中值滤波、高通 0.05 Hz、带通 0.1–0.35 Hz，见 `src/ble_analysis/segments.py`）。代码读取 `bandpass_filtered` 和 `highpass_filtered` 输出用于评分和 BPM 估计。
-     - 逐 tone BPM：`_bpm_from_waveform` 在配置的呼吸频带内拟合正弦基，通过最小二乘评分选择最优频率，返回 `BPM = 60 * f`。
-     - 质量评分：使用两个保守指标——能量比 η（`_energy_ratio`）：呼吸带能量/总能量；峰值比 ρ（`_tone_band_quality`）：峰值功率/呼吸带总功率。这些指标按 tone/窗口计算。
-     - 融合规则：逐窗权重 = clip(η * ρ)（带小 eps 保护）。若所有权重接近零，使用均匀权重。最终 BPM 是逐 tone BPM 的加权中位数；如果单个 tone 主导权重且有有效 BPM，则回退到该 tone 的 BPM。
+参考论文：
 
-   - 额外诊断图：生成了更多诊断图以检查逐窗和逐 tone 行为（见下面的图表）。包括窗级 BPM 曲线、窗级误差直方图、段落级相对误差柱状图，以及选定段落的 tone 质量散点图（η vs ρ，以 BPM 为颜色）。
+> Xuefeng Liu, Jiannong Cao, Shaojie Tang, Jiaqi Wen, and Peng Guo, "Contactless Respiration Monitoring Via Off-the-Shelf WiFi Devices," IEEE Transactions on Mobile Computing, 15(10), 2466-2479, 2016.
 
-3. 代码位置
-   - `src/ble_analysis/liu_2016.py`
-   - `notebooks/scripts/chFusion_liu_2016.py`
-   - `notebooks/liu_2016_step_by_step.ipynb`
-   - `tests/test_liu_2016.py`
+Liu 2016 原文输入是 WiFi CFR/CSI 的子载波幅度。对应到本项目的 BLE CS 数据，严格复现默认使用 `amplitudes`，因为 `load_ble_frames` 读出的原始帧中包含逐频点的 `channels[*]["amplitude"]`，这是当前数据结构里最接近 CFR 幅度的变量。
 
-4. 与现有管道对齐
-   - 复用 BLE CS 多通道滤波缓存和段落配置。
-   - 使用 `BreathMetricParams` 和 `ChFusionConfig` 中定义的标准滑窗参数。
+### 算法流程与分步输出
 
-## 详细实现（可复现说明）
+对每个 breath 段落：
 
-1) 变量采集
-- 代码对三种模态变量 `remote_amplitudes`、`local_amplitudes` 和 `phases` 的每个 `variable|channel` 组合进行采集。每个组合产出 `bandpass_filtered` 和 `highpass_filtered` 两个数组，作为独立的 tone 候选信号。
+1. 根据帧的 `index`、`timestamp_ms` 和 `channels` 提取逐频点的原始 `amplitude`。
+2. 对每个频点执行 Liu-style 预处理：
+   - Hampel 异常点去除；
+   - 线性插值到均匀时间网格；
+   - 四层 `db4` 小波近似重构。
+3. 对每个 20 s 窗口、每个频点估计呼吸频率：
+   - 对窗口信号做 FFT；
+   - 在配置的呼吸频段内寻找正频率 FFT 峰值；
+   - 只保留峰值 bin 及其左右相邻 bin，即 peak ± 1；
+   - 其他频率 bin 置零后做 inverse FFT，得到复数窄带时域信号；
+   - 对相位展开，通过相位斜率细化估计更高分辨率的频率。
+4. 计算周期性指标：
+   - 固定上一步估计出的频率 `f`，拟合 `a sin(2*pi*f*t) + b cos(2*pi*f*t) + D`；
+   - 计算 `A = sqrt(a^2 + b^2)`；
+   - 计算拟合误差 `RMSE`；
+   - 使用 Liu 原文的周期性水平 `pr = A / RMSE`。
+5. 对所有频点的频率候选值使用 Liu 原文 modified Z-score 去除离群值。
+6. 对剩余频率候选值使用 `pr` 归一化权重做加权中位数融合。
+7. 将最终频率转换为 BPM。
 
-2) 准确的滤波参数
-- `FilterParams`（见 `src/ble_analysis/segments.py`）— notebook 中使用的默认值：
-  - `median_window = 3`
-  - `highpass_cutoff = 0.05` Hz，`highpass_order = 1`
-  - `bandpass_lowcut = 0.1` Hz，`bandpass_highcut = 0.35` Hz，`bandpass_order = 2`
+Liu 原文中提到用 Nelder-Mead 拟合正弦参数。由于本实现中频率 `f` 已由前一步估计并固定，剩余参数可写成等价的线性最小二乘形式 `a sin(2*pi*f*t) + b cos(2*pi*f*t) + D`。报告和代码中均按这个等价形式说明。
 
-3) 滑窗和 BPM 窗口参数
-- `BreathMetricParams`（默认值）：`breath_freq_low = 0.1` Hz，`breath_freq_high = 0.35` Hz，`window_length_sec = 20.0`，`step_length_sec = 1.0`。
-- 样本级窗口长度 = round(window_length_sec * fs)，步长 = round(step_length_sec * fs)。
+每一步的输出不再只给一个总表，而是拆成三类 CSV 和多类图：
 
-4) 逐 tone BPM 估计算法（`_bpm_from_waveform`）
-- 前提条件：对窗化信号做去均值并要求有限样本。
-- 频率网格：`freqs = linspace(cfg.breath_freq_low, cfg.breath_freq_high, 512)`（呼吸频带内 512 点扫描）。
-- 对每个候选频率 f，构造两个基向量 sin(2π f t) 和 cos(2π f t)，计算最小二乘系数以拟合信号。
-- 评分 = dot(sig, fit) / (||sig|| * ||fit|| + eps)（归一化相关性样评分）。选择评分最高的 f，返回 `60 * f` 作为 BPM。
+| 步骤 | 表格/图 | 用途 |
+|---|---|---|
+| 预处理可行性 | `diagnostics/liu_2016_paper_{scenario}_diagnostics.csv` 与 `*_preprocessing_status.png` | 检查每个频点是否通过原始预处理，特别是 `db4` level 4 样本数是否足够。 |
+| 窗口估计 | `windows/liu_2016_paper_{scenario}_window_results.csv` 与 `*_window_diagnostics.png` | 查看每个窗口的 BPM、保留频点数、`pr`、离群比例。 |
+| 段落汇总 | `summary/liu_2016_paper_{scenario}_summary.csv` 与 `*_segment_errors.png` | 计算每个呼吸段的预测 BPM、相对误差、有效窗口数。 |
+| 跨场景汇总 | `liu_2016_paper_cross_scenario_summary.csv`、`*_coverage_heatmap.png`、`*_cross_scenario_summary.png` | 查看有效段覆盖率和跨场景误差。 |
 
-5) Tone 质量指标（权重）
-- 能量比 η：在 `_energy_ratio` 中实现 — 计算窗化（Hann）信号的 FFT 功率；呼吸带功率求和除以总配置频带功率。返回 [0,1] 范围内的比率。
-- 峰值比 ρ：在 `_tone_band_quality` 中实现 — 计算呼吸带 FFT 功率，返回 `峰值功率/总频带功率`（保守的峰突出度）。
-- 逐 tone 组合权重：`w_c = clip(η * ρ, 0, +inf) + eps`。若 sum(w_c) ≤ eps，代码使用均匀权重。
+### 参数设置
 
-6) 融合：加权中位数 + 主导 tone 回退
-- 加权中位数：`_weighted_median(values, weights)` 对值排序，计算累积归一化权重，返回 0.5 分位数处的值。
-- 主导 tone 回退：如果 `argmax(weights)` 得到有有效 BPM 的 tone，立即返回该 BPM（这反映了论文对高置信度 tone 的实际偏好）。
+| 参数 | 当前值 | 说明 |
+|---|---:|---|
+| 窗长 | 20 s | Liu 2016 主实验设置 |
+| 步长 | 1 s | 本项目滑窗评估设置 |
+| 呼吸频段 | 0.1-0.35 Hz | 覆盖当前 GT：8.675-16.17 BPM |
+| Modified Z-score 阈值 | 3.5 | Liu 原文阈值 |
+| Modified Z-score 系数 | 0.7645 | Liu 2016 PDF 公式 (4) 中显示的数值 |
+| 小波 | db4, level 4 | Liu 原文预处理 |
 
-7) 伪代码（逐窗）
+需要特别说明：`0.7645` 与常见 modified Z-score 系数 `0.6745` 不同。本实现以 Liu 2016 PDF 公式中显示的 `0.7645` 为准，并在 `Liu2016PaperConfig` 中保留可配置项。
 
-```text
-对每个滑窗：
-  采集每个 (variable, channel) 的 bandpass_filtered 波形 -> x_i(t)
-  计算 eta_i = _energy_ratio(highpass(x_i))
-  计算 rho_i = _tone_band_quality(bandpass(x_i))
-  估计 bpm_i = _bpm_from_waveform(bandpass(x_i))
-  w_i = clip(eta_i * rho_i) + eps
-  如果 sum(w_i) <= eps: w_i = ones
-  dominant = argmax(w_i)
-  如果 isfinite(bpm_dominant): bpm_out = bpm_dominant
-  否则: bpm_out = weighted_median(bpm_i, w_i)
-```
+### BLE 采样率限制
 
-8) 可复现命令
-- 为单个场景/段落生成诊断和图表：
+Liu 原文 WiFi 设置约每 50 ms 发送一个数据包，即约 20 Hz。本项目 BLE CS 示例数据的采样率约为 1.7-1.9 Hz。因此，严格实现会在每个完整段落、每个频点上检查是否足够支持 `db4` level 4 小波分解。
+
+如果 `pywt.dwt_max_level(n_samples, db4.dec_len) < 4`，该频点会被跳过，并在诊断表中记录 `skip_reason=wavelet_level_insufficient`。实现不会静默降级到更低的小波层数。
+
+这意味着：本项目实现了基于原始数据的 Liu-style 预处理，但 BLE 低采样率会限制可参与严格复现的段落和频点数量。
+
+## 已有 BLE 适配基线
+
+历史实现保留为：
+
+- `estimate_liu_eta_rho_adapted_window_bpms`
+- `run_liu_eta_rho_adapted_benchmark`
+
+为了兼容旧 notebook，`estimate_liu_style_window_bpms` 和 `run_liu_2016_benchmark` 等旧名称仍然存在，但它们指向的是 BLE 适配基线，不是严格 Liu 2016 复现。
+
+该适配基线使用：
+
+- 本项目的呼吸频段能量比例；
+- 谱峰质量指标；
+- `η·ρ` 权重；
+- dominant-tone fallback。
+
+它可以作为 BLE 基线使用，但不能写成 Liu et al. 2016 原文方法。
+
+## 复现命令
+
+严格原文复现：
+
 ```bash
-PYTHONPATH=src python notebooks/scripts/chFusion_liu_2016_diagnostics.py --scenario cs_091339 --segment 3
+PYTHONPATH=src python notebooks/scripts/chFusion_liu_2016_paper.py --scenario cs_091339
+PYTHONPATH=src python notebooks/scripts/chFusion_liu_2016_paper.py --all
 ```
-- 为所有场景生成诊断：
+
+单元测试：
+
 ```bash
-PYTHONPATH=src python notebooks/scripts/chFusion_liu_2016_diagnostics.py --all
-```
-- 运行完整 benchmark 并保存合并结果：
-```bash
-PYTHONPATH=src python notebooks/scripts/chFusion_liu_2016.py --all
+.venv/bin/python -m unittest tests/test_liu_2016.py -v
 ```
 
-9) 生成的图表（示例）
-- `outputs/figures/liu_2016_cs_091339_segment_3_window_bpm_curve.png`
-- `outputs/figures/liu_2016_cs_091339_segment_3_tone_quality.png`
-- `outputs/figures/liu_2016_cs_091339_segment_3_window_error_hist.png`
-- `outputs/figures/liu_2016_cs_091339_segment_rel_err.png`
-- 汇总图表：`segment_error_analysis.png`、`segment_window_error_distribution.png`
+## 输出文件
 
-10) 关键文件（实现和运行器）
-- `src/ble_analysis/liu_2016.py` — Liu 风格估计器和窗口聚合
-- `src/ble_analysis/chfusion.py` — 通用辅助函数：`_energy_ratio`、`_weighted_median`、`_seg_bpm_stats`、FFT 辅助函数
-- `src/ble_analysis/segments.py` — `FilterParams` 和滑窗辅助函数
-- `notebooks/liu_2016_step_by_step.ipynb` — 交互式演示
-- `notebooks/scripts/chFusion_liu_2016.py` — 批量运行脚本
-- `notebooks/scripts/chFusion_liu_2016_diagnostics.py` — 诊断图生成器
+严格复现结果单独输出到 `liu_2016_paper` 子目录：
 
-如果需要，还可以补充 LS 拟合和加权中位数定义的准确公式（LaTeX），或附加一个可直接运行的 `Makefile` 片段以生成所有图表和报告 PDF。
+- `outputs/reports/liu_2016_paper/summary/liu_2016_paper_{scenario}_summary.csv`
+- `outputs/reports/liu_2016_paper/windows/liu_2016_paper_{scenario}_window_results.csv`
+- `outputs/reports/liu_2016_paper/diagnostics/liu_2016_paper_{scenario}_diagnostics.csv`
+- `outputs/reports/liu_2016_paper/liu_2016_paper_cross_scenario_summary.csv`
+- `outputs/reports/liu_2016_paper/liu_2016_paper_results_report.md`
+- `outputs/figures/liu_2016_paper/liu_2016_paper_{scenario}_segment_errors.png`
+- `outputs/figures/liu_2016_paper/liu_2016_paper_{scenario}_preprocessing_status.png`
+- `outputs/figures/liu_2016_paper/liu_2016_paper_{scenario}_segment_{segment}_window_diagnostics.png`
+- `outputs/figures/liu_2016_paper/liu_2016_paper_coverage_heatmap.png`
+- `outputs/figures/liu_2016_paper/liu_2016_paper_cross_scenario_summary.png`
 
-## 执行步骤
+关键字段包括：`scenario`、`segment`、`method`、`variable`、`bpm_gt`、`bpm_pred`、`mean_rel_err_pct`、`std_rel_err_pct`、`n_windows`、`median_n_tones`、`median_n_kept`、`mean_outlier_frac`、`mean_pr`、`zscore_scale`、`breath_freq_low`、`breath_freq_high`、`preprocessing_mode` 和 `skip_reason`。
 
-### 步骤 1：环境准备
+## 图表目录整理
 
-- 确保 notebook 或脚本从仓库根目录运行。
-- 在导入 `ble_analysis` 之前将 `src` 加入 `PYTHONPATH`。
-- 使用 `ble_analysis.bootstrap.init_notebook(project_root)` 初始化环境。
+当前 Liu 相关图表按用途分为三类：
 
-### 步骤 2：加载场景
+| 目录 | 用途 |
+|---|---|
+| `outputs/figures/liu_2016_paper/` | 严格原文复现主图和窗口诊断图。 |
+| `outputs/figures/liu_2016_ble_ablation/` | BLE 四变量消融实验主图。 |
+| `outputs/figures/liu_2016_adapted_legacy/` | 旧版 BLE 适配基线诊断图归档。 |
 
-- 通过 `load_scenario(scenario_id, project_root=project_root)` 加载场景 `cs_091339`。
-- 确认场景包含 9 个段落：7 个呼吸段和 2 个暂停段。
+严格复现报告和 BLE 消融报告中已经直接插入推荐主图。`legacy_flat` 和 `legacy_modal` 子目录只作历史输出归档，不建议作为最终报告主图。
 
-### 步骤 3：多通道预处理
+本次严格复现结果和解释见 [liu_2016_results_report.md](</Users/shenmeichen/26 X program/ble_hci_sensing-main/docs/reports/liu_2016_results_report.md>)。
 
-- 使用 `load_multichannel_for_scenario(...)` 和 `FilterParams()` 及缓存目录。
-- 验证后的 notebook 报告所有变量和段落都命中缓存。
-- 输出：`fs=1.80 Hz`，变量 `['remote_amplitudes', 'local_amplitudes', 'phases']`。
-
-### 步骤 4：运行 Liu 2016 基线
-
-- 执行 `run_liu_2016_benchmark(None, scenario.segment_config, ...)`。
-- Benchmark 使用滤波后的多通道数据和相同的窗/步长设置。
-- 返回一个包含每个段落结果的字典。
-
-### 步骤 5：结果汇总
-
-- 使用 `_overall_rel_error(bench['results'], 'liu_2016')` 汇总性能。
-- 打印每个段落的 ID 和相对误差值。
-
-### 步骤 6：单段诊断
-
-- 选取 `seg_name='3'` 进行详细分析。
-- 提取 `row['liu_2016']['bpm_per_window']` 和真值 `row['bpm_gt']`。
-- 绘制滑窗 BPM 曲线并保存图表。
-
-## 结果
-
-| 场景 | 平均相对误差 (%) | 标准差 (%) | 备注 |
-|---|---|---|---|
-| cs_091339 | 14.62 | 8.50 | 中等精度 |
-| cs_095806 | 39.45 | 38.02 | 误差大且稳定性差 |
-| cs_102621 | 4.21 | 1.71 | 表现良好 |
-
-- `cs_091339` 表现为中等准确度，结果稳定性尚可。
-- `cs_095806` 误差很大，方差也高，说明该方法在此场景下不稳定。
-- `cs_102621` 结果最佳，说明当 tone 质量分布较好时，Liu 风格方法是有效的。
-
-## 图表
-
-### 图表 A：段落 3 窗级 BPM 曲线
-
-![](../../outputs/figures/liu_2016_cs_091339_segment_3_window_bpm_curve.png)
-
-该图展示了 `cs_091339` 段落 `3` 的逐窗估计 BPM，并叠加了真值 BPM。
-
-### 图表 B：段落 3 tone 质量散点图
-
-![](../../outputs/figures/liu_2016_cs_091339_segment_3_tone_quality.png)
-
-该散点图展示了段落 3 某个窗口中逐 tone 的能量比 η 与峰值比 ρ；颜色表示每个 tone 估计的 BPM 候选值。
-
-### 图表 C：段落 3 窗级 BPM 误差直方图
-
-![](../../outputs/figures/liu_2016_cs_091339_segment_3_window_error_hist.png)
-
-`cs_091339` 段落 `3` 逐窗绝对 BPM 误差的分布。
-
-### 图表 D：段落相对误差柱状图
-
-![](../../outputs/figures/liu_2016_cs_091339_segment_rel_err.png)
-
-场景中各段落的相对误差 (%)。
-
-### 汇总图表
-
-![](../../outputs/figures/segment_error_analysis.png)
-
-![](../../outputs/figures/segment_window_error_distribution.png)
-
-## 分析
-
-### 优势
-
-- 实现严格遵循 Liu 2016 概念，未引入额外的启发式融合步骤。
-- 能够平顺集成到 BLE CS 多通道管道中，并复用缓存数据。
-- 在 `cs_102621` 上表现出色，表明当 tone 级质量良好时，该方法很有潜力。
-
-### 弱点
-
-- 方法对场景变化敏感：`cs_095806` 显示明显较大的误差和较高方差。
-- 当前加权融合在只有少数 tone 具有高质量时可能比较脆弱。
-- 目前尚未与现有基线（如 `Modal top2`、`Uniform` 或 `chFusion`）进行直接并排对比。
-
-### 后续建议
-
-- 在相同场景集上将 Liu 2016 基线与当前模态融合基线进行对比。
-- 检查 `cs_095806` 中的 tone 级质量和 BPM 候选值分布。
-- 如果缺少计划文件，补齐 `docs/plans/liu_2016_plan.md`，明确假设和评估设计。
-- 若当前 tone 加权中位数仍不足够稳健，考虑加入窗级门控或共识机制。
-
-## 验证命令
-
-- 回归测试：
-  - `python -m pytest -q tests/test_liu_2016.py`
-- 场景 benchmark 运行：
-  - `PYTHONPATH=src python notebooks/scripts/chFusion_liu_2016.py --all`
-- Notebook 运行：
-  - 打开 `notebooks/liu_2016_step_by_step.ipynb` 并执行所有单元。
-
-## Git 状态
-
-当前已修改或未跟踪的文件：
-
-- `src/ble_analysis/__init__.py`
-- `docs/reports/liu_2016_report.md`
-- `notebooks/liu_2016_step_by_step.ipynb`
-- `notebooks/executed_liu_2016_step_by_step.ipynb`
-- `notebooks/scripts/chFusion_liu_2016.py`
-- `src/ble_analysis/liu_2016.py`
-- `tests/test_liu_2016.py`
-
+BLE 四变量对比已单独整理为消融实验报告，见 [liu_2016_ble_ablation_report.md](</Users/shenmeichen/26 X program/ble_hci_sensing-main/docs/reports/liu_2016_ble_ablation_report.md>)。该报告不属于 Liu 2016 原文严格复现主结果。

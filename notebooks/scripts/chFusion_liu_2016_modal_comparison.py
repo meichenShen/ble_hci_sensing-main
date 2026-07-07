@@ -168,7 +168,8 @@ def save_modal_results_table(reports_dir: Path, scenario_id: str, df: pd.DataFra
 def main() -> None:
     args = parse_args()
     env = init_notebook(project_root)
-    figures_dir = env["FIGURES_DIR"]
+    figures_dir = env["FIGURES_DIR"] / "liu_2016_ble_ablation" / "legacy_modal"
+    figures_dir.mkdir(parents=True, exist_ok=True)
     reports_dir = env["REPORTS_DIR"]
     cache_dir = project_root / "outputs" / "cache"
     cache_dir.mkdir(parents=True, exist_ok=True)

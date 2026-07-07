@@ -18,10 +18,19 @@ from ble_analysis.diagnostics import (
 )
 from ble_analysis.filters import apply_filter_pipeline
 from ble_analysis.liu_2016 import (
+    Liu2016PaperConfig,
     MODAL_LIU_VARIABLES,
+    estimate_fft_phase_slope_bpm,
+    estimate_liu_2016_paper_window,
+    estimate_liu_eta_rho_adapted_window_bpms,
     estimate_liu_style_segment,
     estimate_liu_style_window_bpms,
+    modified_z_score_filter,
+    run_liu_2016_paper_benchmark,
+    run_liu_eta_rho_adapted_benchmark,
     run_liu_2016_benchmark,
+    score_sinusoid_periodicity,
+    weighted_median_frequency,
 )
 from ble_analysis.paths import ensure_output_dirs, find_project_root
 from ble_analysis.plotting import (
@@ -61,7 +70,16 @@ __all__ = [
     "print_time_interval_summary",
     "resample_to_uniform_grid",
     "apply_filter_pipeline",
+    "Liu2016PaperConfig",
     "MODAL_LIU_VARIABLES",
+    "estimate_fft_phase_slope_bpm",
+    "score_sinusoid_periodicity",
+    "modified_z_score_filter",
+    "weighted_median_frequency",
+    "estimate_liu_2016_paper_window",
+    "run_liu_2016_paper_benchmark",
+    "estimate_liu_eta_rho_adapted_window_bpms",
+    "run_liu_eta_rho_adapted_benchmark",
     "estimate_liu_style_segment",
     "estimate_liu_style_window_bpms",
     "run_liu_2016_benchmark",
