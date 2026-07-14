@@ -1,21 +1,32 @@
-# Liu 2016 BLE 变量消融实验报告
+# Liu 2016 BLE 历史变量消融报告
 
-## 定位说明
+## 当前定位
 
-本报告只讨论 BLE 数据中的四类变量对比：
+本报告是历史 exploratory ablation，用来记录早期对 `remote_amplitudes`、`local_amplitudes`、`phases` 和 `combined` 的 BLE 变量对比。它不再作为项目最终结论，也不再用于说明“哪个变量最好”。
 
-- `remote_amplitudes`
-- `local_amplitudes`
-- `phases`
-- `combined (remote+local+phases)`
+现在项目主线已经调整为：
 
-这部分是 **BLE 变量消融实验**，不是 Liu et al. 2016 原文严格复现。Liu 2016 原文方法只基于 WiFi CFR/CSI 幅度子载波，因此四变量对比不能写成 Liu 原文方法，也不能混入 `liu_2016_paper` 主结果。
+```text
+Stage 1：单变量信息能力分析
+Stage 2：多变量融合方法比较
+```
 
-本报告对应的是已有 BLE 适配基线，即 `liu_eta_rho_adapted` / 历史 Liu-style adapted pipeline。它使用本项目已有的多通道缓存、BLE 变量构造和适配性质量指标。严格原文复现结果见 [liu_2016_results_report.md](</Users/shenmeichen/26 X program/ble_hci_sensing-main/docs/reports/liu_2016_results_report.md>)。
+因此，本报告的作用是说明：早期变量消融观察到不同变量在不同场景中表现会变化，这提示 BLE CS 存在多变量互补性，进而引出 `multivariable_fusion` 研究。
+
+严格 Liu 2016 原文复现见：
+
+- [liu_2016_report.md](</Users/shenmeichen/26 X program/ble_hci_sensing-main/docs/reports/liu_2016_report.md>)
+- [liu_2016_results_report.md](</Users/shenmeichen/26 X program/ble_hci_sensing-main/docs/reports/liu_2016_results_report.md>)
+
+新的多变量融合研究见：
+
+- [multivariable_fusion_plan_report.md](</Users/shenmeichen/26 X program/ble_hci_sensing-main/docs/reports/multivariable_fusion_plan_report.md>)
+- [stage1_variable_information_report.md](</Users/shenmeichen/26 X program/ble_hci_sensing-main/docs/reports/stage1_variable_information_report.md>)
+- [stage2_multivariable_fusion_report.md](</Users/shenmeichen/26 X program/ble_hci_sensing-main/docs/reports/stage2_multivariable_fusion_report.md>)
 
 ## 数据来源
 
-结果来自此前运行：
+历史结果来自：
 
 ```bash
 PYTHONPATH=src python notebooks/scripts/chFusion_liu_2016_modal_comparison.py --all
@@ -28,95 +39,87 @@ PYTHONPATH=src python notebooks/scripts/chFusion_liu_2016_modal_comparison.py --
 - `outputs/reports/liu_2016_cs_102621_modal_comparison.csv`
 - `outputs/reports/liu_2016_cross_scenario_modal_summary.csv`
 
-新整理的紧凑图表放在：
+整理后的图：
 
-- `outputs/figures/liu_2016_ble_ablation/liu_2016_ble_ablation_cross_variable_summary.png`
-- `outputs/figures/liu_2016_ble_ablation/liu_2016_ble_ablation_scenario_heatmap.png`
-- `outputs/figures/liu_2016_ble_ablation/liu_2016_ble_ablation_cs_091339_summary.png`
-- `outputs/figures/liu_2016_ble_ablation/liu_2016_ble_ablation_cs_095806_summary.png`
-- `outputs/figures/liu_2016_ble_ablation/liu_2016_ble_ablation_cs_102621_summary.png`
+![Historical BLE ablation cross-variable summary](../../outputs/figures/liu_2016_ble_ablation/liu_2016_ble_ablation_cross_variable_summary.png)
 
-## 跨场景总体结果
+![Historical BLE ablation scenario heatmap](../../outputs/figures/liu_2016_ble_ablation/liu_2016_ble_ablation_scenario_heatmap.png)
 
-| 变量 | 跨场景平均相对误差 | 排名 | 解释 |
-|---|---:|---:|---|
-| `combined (remote+local+phases)` | 8.66% | 1 | 总体最低，说明 BLE 多变量融合在适配基线中有收益。 |
-| `remote_amplitudes` | 8.93% | 2 | 与 combined 非常接近，是单变量中最稳定的一类。 |
-| `phases` | 10.95% | 3 | 整体可用，但跨场景波动更明显。 |
-| `local_amplitudes` | 14.02% | 4 | 总体最差，主要受 `cs_091339` 中大误差拖累。 |
+![Historical BLE ablation cs_091339](../../outputs/figures/liu_2016_ble_ablation/liu_2016_ble_ablation_cs_091339_summary.png)
 
-总体结论：在这个 BLE adapted baseline 中，`combined` 平均最好，`remote_amplitudes` 接近 `combined`，`phases` 次之，`local_amplitudes` 最弱。
+![Historical BLE ablation cs_095806](../../outputs/figures/liu_2016_ble_ablation/liu_2016_ble_ablation_cs_095806_summary.png)
 
-## 分场景结果
+![Historical BLE ablation cs_102621](../../outputs/figures/liu_2016_ble_ablation/liu_2016_ble_ablation_cs_102621_summary.png)
 
-| 场景 | 最优变量 | 最优平均误差 | 变量排序 |
-|---|---|---:|---|
-| `cs_091339` | `remote_amplitudes` | 13.20% | `remote_amplitudes` ≈ `combined` < `phases` < `local_amplitudes` |
-| `cs_095806` | `phases` | 6.43% | `phases` ≈ `local_amplitudes` < `combined` < `remote_amplitudes` |
-| `cs_102621` | `local_amplitudes` | 5.05% | `local_amplitudes` < `combined` < `remote_amplitudes` < `phases` |
+## 图表解读
 
-分场景结果说明，四变量表现并非完全固定。`combined` 的优势主要体现在跨场景平均稳定，而不是每个场景都第一。单场景里，`phases` 或 `local_amplitudes` 也可能达到更低误差。
+### 图 1：历史跨变量平均误差
 
-## 分场景数值表
+![Historical BLE ablation cross-variable summary](../../outputs/figures/liu_2016_ble_ablation/liu_2016_ble_ablation_cross_variable_summary.png)
 
-| 场景 | `combined` | `remote_amplitudes` | `phases` | `local_amplitudes` |
-|---|---:|---:|---:|---:|
-| `cs_091339` | 13.42% | 13.20% | 16.02% | 29.45% |
-| `cs_095806` | 6.95% | 7.69% | 6.43% | 6.48% |
-| `cs_102621` | 5.36% | 5.74% | 9.75% | 5.05% |
+这张图曾经容易被理解成“变量排名”。现在应把它解释为：早期 `combined` 结果显示多个 BLE 变量一起使用有潜在收益，因此值得进入新的 fusion study。它不能被写成 strict Liu reproduction 的结论，也不能直接作为最终变量选择依据。
 
-## 图表说明
+### 图 2：场景 × 变量热图
 
-推荐使用新整理的紧凑图，而不是旧的多子图长标签版本：
+![Historical BLE ablation scenario heatmap](../../outputs/figures/liu_2016_ble_ablation/liu_2016_ble_ablation_scenario_heatmap.png)
 
-1. `liu_2016_ble_ablation_cross_variable_summary.png`
-   - 展示四变量跨场景平均误差；
-   - 用于报告总览。
+这张图更适合支撑“互补性”结论。不同场景下低误差变量并不固定，说明变量可靠性随场景变化。这个现象比单个平均排名更重要，因为它说明固定选择一个变量可能会在某些场景失效。
 
-2. `liu_2016_ble_ablation_scenario_heatmap.png`
-   - 展示场景 × 变量的误差矩阵；
-   - 用于说明“combined 总体最好，但单场景最优变量会变化”。
+### 图 3-5：分场景变量消融
 
-3. `liu_2016_ble_ablation_{scenario}_summary.png`
-   - 每个场景一张紧凑柱状图；
-   - 用于逐场景解释变量差异。
+![Historical BLE ablation cs_091339](../../outputs/figures/liu_2016_ble_ablation/liu_2016_ble_ablation_cs_091339_summary.png)
 
-旧图已归档到 `outputs/figures/liu_2016_ble_ablation/legacy_modal/` 下，例如 `liu_2016_cs_091339_modal_comparison_bars.png` 和 `liu_2016_cs_091339_modal_by_segment.png`。这些图可以作为历史输出，但因为标签较长、版式较拥挤，不建议作为最终报告主图。
+`cs_091339` 中 `remote_amplitudes` 与 `combined` 更接近，`local_amplitudes` 明显偏弱。这说明 local branch 在某些采集条件下可能不可靠。
 
-### 推荐主图
+![Historical BLE ablation cs_095806](../../outputs/figures/liu_2016_ble_ablation/liu_2016_ble_ablation_cs_095806_summary.png)
 
-**图 1：四变量跨场景平均误差**
+`cs_095806` 中 `phases` 和 `local_amplitudes` 也能取得较低误差，说明 phase 不应因为全局平均不占优而被直接排除。
 
-![四变量跨场景平均误差](../../outputs/figures/liu_2016_ble_ablation/liu_2016_ble_ablation_cross_variable_summary.png)
+![Historical BLE ablation cs_102621](../../outputs/figures/liu_2016_ble_ablation/liu_2016_ble_ablation_cs_102621_summary.png)
 
-**图 2：场景 × 变量误差热图**
+`cs_102621` 中 `local_amplitudes` 和 `combined` 表现较好，进一步说明变量稳定性具有场景依赖。这个现象正是 Stage 2 adaptive selection 和 variable-level fusion 的动机。
 
-![场景与变量误差热图](../../outputs/figures/liu_2016_ble_ablation/liu_2016_ble_ablation_scenario_heatmap.png)
+## 历史观察
 
-**图 3：分场景变量对比**
+| 变量 | 历史跨场景平均相对误差 | 现在的解释 |
+|---|---:|---|
+| `combined (remote+local+phases)` | 8.66% | 多变量组合在早期 adapted baseline 中有收益，支持后续融合研究 |
+| `remote_amplitudes` | 8.93% | 单变量中曾表现稳定，但不能作为最终唯一变量结论 |
+| `phases` | 10.95% | 部分场景有效，说明 phase 可能提供互补信息 |
+| `local_amplitudes` | 14.02% | 场景敏感，但在部分场景中也可能有效 |
 
-![cs_091339 变量对比](../../outputs/figures/liu_2016_ble_ablation/liu_2016_ble_ablation_cs_091339_summary.png)
+这些数值只保留为历史记录。由于该实验使用的是 BLE adapted pipeline，不是 strict Liu 2016 reproduction，也不是新的融合研究主流程，所以不应继续写成最终排名。
 
-![cs_095806 变量对比](../../outputs/figures/liu_2016_ble_ablation/liu_2016_ble_ablation_cs_095806_summary.png)
+## 分场景互补性
 
-![cs_102621 变量对比](../../outputs/figures/liu_2016_ble_ablation/liu_2016_ble_ablation_cs_102621_summary.png)
+| 场景 | 历史低误差变量 | 观察 |
+|---|---|---|
+| `cs_091339` | `remote_amplitudes` / `combined` | remote 更稳，local 失效较明显 |
+| `cs_095806` | `phases` / `local_amplitudes` | phase 和 local 均有可用信息 |
+| `cs_102621` | `local_amplitudes` / `combined` | local 在该场景中有效，phase 波动较大 |
 
-## 结果解释
+这说明单变量表现不是固定的。更合理的研究问题不是“哪个变量全局最好”，而是“如何在窗口级动态利用不同变量的信息”。
 
-四变量对比的主要意义是回答：在 BLE CS 数据中，哪类变量更适合承载 Liu-style 呼吸频率估计流程。结果显示，`remote_amplitudes` 单独已经接近 `combined`，说明远端幅度变量可能是当前 BLE 数据中最接近 CFR 幅度信息的一类变量。
+换句话说，历史 ablation 的价值不是证明 `combined` 一定最好，而是证明变量之间存在互补关系。新的 `multivariable_fusion` 报告会进一步把这种互补性拆解为 tone-level 和 variable-level 两个层级。
 
-`combined` 的跨场景平均误差最低，说明融合多个 BLE 变量可以提升总体稳健性。但是这属于 BLE adaptation，不属于 Liu 2016 原文方法。写论文或报告时应表述为：
+## 与新研究的关系
 
-> 在 BLE 适配基线中，四变量消融显示 `combined` 与 `remote_amplitudes` 表现最好；但严格 Liu 2016 原文复现仍以 amplitude-like variable 为主输入。
+早期 `combined` 结果说明简单组合可能有效，但它没有清楚区分：
 
-`local_amplitudes` 在 `cs_091339` 中误差显著偏高，但在 `cs_102621` 中反而最好，说明 local amplitude 对场景或采集条件更敏感。`phases` 在 `cs_095806` 中最好，但整体均值不如 amplitude 类变量稳定。
+- tone/channel-level fusion；
+- variable-level fusion；
+- 质量权重来源；
+- adaptive selection 与 weighted combining 的差异。
+
+因此，新版 `multivariable_fusion` 将问题拆成两个层级：
+
+1. 同一种变量内部多个 tone 如何融合；
+2. local / remote / phase 三个变量之间如何融合。
+
+这个结构比历史四变量排名更适合作为论文和导师汇报的主线。
 
 ## 结论
 
-四变量对比可以作为 BLE adaptation 的补充实验，用来解释不同 BLE 变量的信息量和稳定性。它不能替代 `liu_2016_paper`，也不能作为 Liu 2016 原文严格复现结果。
+本报告只作为历史 exploratory ablation 存档。最终报告中应弱化“变量排名”叙述，改为：
 
-建议最终文档中采用如下结构：
-
-1. `liu_2016_paper`：严格原文复现，只使用 `amplitudes`。
-2. `liu_eta_rho_adapted`：BLE 适配基线。
-3. 本报告：BLE 四变量消融，解释 `remote/local/phase/combined` 的相对表现。
+> 历史 BLE 变量消融显示不同变量在不同场景中存在互补性，因此后续研究转向多层级融合方法比较。
